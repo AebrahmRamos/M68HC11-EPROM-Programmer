@@ -15,6 +15,15 @@ HPRIO   EQU     $3C         ; Offset for HPRIO (Mode Select)
 
 STACK   EQU     $00FF       ; Top of Internal RAM
 
+; programming constants
+MAX_RETRIES EQU 25          ; max number of retries for programming pulse
+VPROG_BIT EQU   %00100000   ; bit 5 for VPP control
+OE_BIT    EQU   %01000000   ; bit 6 for output enable
+CE_BIT    EQU   %00100000   ; bit 5 for chip enable
+
+; variable storage in RAM
+PULSE_COUNT EQU $0100       ; counter for programming pulses
+
         ORG     $0000       ; start of program in RAM
 
 START:
@@ -119,4 +128,119 @@ DELAY_INNER:
         
         PULX                ; restore X back to $1000
         PULY                ; restore Y
+        RTS
+
+; subroutine to program a single byte to the EPROM
+; assumes: data to program is in stack at 0,Y
+; assumes: address to program is in stack at 1,Y
+PROGRAM_BYTE:
+        LDAA    #1              ; start with pulse count = 1
+        STAA    PULSE_COUNT     ; store it
+
+PULSE_LOOP:
+        ; step 1: set data and address on the EPROM pins
+        LDAA    1,Y             ; load address from stack
+        STAA    PORTB,X         ; put it on the address lines
+        
+        ; set Port C to output mode
+        PSHA
+        LDAA    #$FF            ; configure all bits as output
+        STAA    DDRC,X
+        PULA
+        
+        LDAA    0,Y             ; load data from stack
+        STAA    PORTC,X         ; put it on the data lines
+
+        ; step 2: apply a 1ms programming pulse
+        ; turn on VPP, keep OE high, pull CE low
+        LDAA    PORTA,X
+        ORAA    #VPROG_BIT      ; turn on VPP
+        ORAA    #OE_BIT         ; keep OE high (disable output)
+        ANDA    #%11011111      ; pull CE low (enable chip)
+        STAA    PORTA,X
+        
+        JSR     DELAY_1MS       ; wait for 1ms
+
+        ; end the pulse by pulling CE high
+        LDAA    PORTA,X
+        ORAA    #CE_BIT         ; pull CE high (disable chip)
+        STAA    PORTA,X
+
+        ; step 3: verify the byte by reading it back
+        ; set Port C to input mode so we can read
+        PSHA
+        LDAA    #$00
+        STAA    DDRC,X
+        PULA
+
+        ; turn on read mode (CE low, OE low)
+        LDAA    PORTA,X
+        ANDA    #%10011111      ; pull CE and OE low for reading
+        STAA    PORTA,X
+        
+        NOP                     ; wait for data to appear
+        
+        LDAA    PORTC,X         ; read the data we just programmed
+        CMPA    0,Y             ; compare it with what we wanted
+        BEQ     VERIFY_PASS     ; if they match, we're done with this byte!
+
+        ; step 4: verify failed - we need to retry
+        ; reset the control pins to inactive
+        LDAA    PORTA,X
+        ORAA    #%01100000      ; pull CE and OE back high
+        STAA    PORTA,X
+
+        INC     PULSE_COUNT     ; try again (increment pulse count)
+        LDAA    PULSE_COUNT
+        CMPA    #MAX_RETRIES    ; have we tried too many times?
+        BGT     PROG_FAIL       ; if yes, the EPROM might be defective
+        
+        BRA     PULSE_LOOP      ; go back and try another 1ms pulse
+
+VERIFY_PASS:
+        ; step 5: over-program with a 3ms pulse to ensure proper programming
+        ; set Port C back to output and restore the data
+        LDAA    #$FF
+        STAA    DDRC,X
+        LDAA    0,Y
+        STAA    PORTC,X
+
+        ; apply the over-program pulse (VPP on, CE low, OE high)
+        LDAA    PORTA,X
+        ORAA    #VPROG_BIT
+        ORAA    #OE_BIT
+        ANDA    #%11011111      ; CE low
+        STAA    PORTA,X
+
+        JSR     DELAY_1MS       ; pulse for 3ms total
+        JSR     DELAY_1MS
+        JSR     DELAY_1MS
+
+        ; end the over-program pulse
+        LDAA    PORTA,X
+        ORAA    #CE_BIT         ; pull CE high
+        STAA    PORTA,X
+        
+        RTS                     ; done! return to caller
+
+PROG_FAIL:
+        ; byte could not be programmed after 25 retries
+        SWI                     ; stop and signal error
+
+; subroutine for 1 millisecond delay
+DELAY_1MS:
+        PSHY
+        PSHX
+        
+        LDY     #$0004          ; approx. 1ms at 2MHz E-clock
+DELAY_1MS_OUTER:
+        LDX     #$FFFF
+DELAY_1MS_INNER:
+        DEX
+        BNE     DELAY_1MS_INNER
+        DEY
+        BNE     DELAY_1MS_OUTER
+        
+        PULX
+        PULY
         RTS

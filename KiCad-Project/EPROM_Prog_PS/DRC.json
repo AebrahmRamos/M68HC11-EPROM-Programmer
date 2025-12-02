@@ -1,0 +1,162 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2025-12-02T08:06:45+0800",
+    "kicad_version": "9.0.6",
+    "schematic_parity": [],
+    "source": "EPROM_Prog_PS.kicad_pcb",
+    "unconnected_items": [],
+    "violations": [
+        {
+            "description": "Clearance violation (netclass 'Default' clearance 0.2550 mm; actual 0.2200 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 1 [Net-(D3-A)] of U1",
+                    "pos": {
+                        "x": 42.73,
+                        "y": 43.98
+                    },
+                    "uuid": "b993fd4c-43e1-4ef0-b794-723b2bc832b4"
+                },
+                {
+                    "description": "PTH pad 2 [Net-(D1-A)] of U1",
+                    "pos": {
+                        "x": 44.0,
+                        "y": 43.98
+                    },
+                    "uuid": "a203aa40-b7fa-442b-acb1-dd881ae8aadd"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (netclass 'Default' clearance 0.2550 mm; actual 0.2200 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 2 [Net-(D1-A)] of U1",
+                    "pos": {
+                        "x": 44.0,
+                        "y": 43.98
+                    },
+                    "uuid": "a203aa40-b7fa-442b-acb1-dd881ae8aadd"
+                },
+                {
+                    "description": "PTH pad 3 [Net-(J1-Pin_1)] of U1",
+                    "pos": {
+                        "x": 45.27,
+                        "y": 43.98
+                    },
+                    "uuid": "1feea7c4-6e26-4fe9-828b-c0f1dcca2299"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(Q1-B)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 20.5411,
+                        "y": 29.7689
+                    },
+                    "uuid": "e7d15879-620b-42f5-a2f9-e02b08c2ae5f"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(Q1-B)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 36.895,
+                        "y": 17.6536
+                    },
+                    "uuid": "779005ca-4169-4293-9c27-3aa77b22ca2d"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(D4-A)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 36.895,
+                        "y": 39.5128
+                    },
+                    "uuid": "6ada270a-77d9-4092-ab78-618492bbdb16"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(J1-Pin_1)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 22.0812,
+                        "y": 34.0015
+                    },
+                    "uuid": "44e5be4e-6516-4413-9cbd-d3ecdde2d82e"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(J1-Pin_1)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 39.813,
+                        "y": 32.9415
+                    },
+                    "uuid": "3cbf894e-5104-4a48-b9df-0929e4b59127"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(J1-Pin_1)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 42.2727,
+                        "y": 40.499
+                    },
+                    "uuid": "90133a2a-965f-468f-83be-5b9a26cc9160"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        },
+        {
+            "description": "Hole size out of range (board setup constraints min hole 0.5842 mm; actual 0.3000 mm)",
+            "items": [
+                {
+                    "description": "Via [Net-(D1-A)] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 19.9951,
+                        "y": 48.4175
+                    },
+                    "uuid": "84fca142-c2b9-40ed-ab8c-d6a152a468c6"
+                }
+            ],
+            "severity": "error",
+            "type": "drill_out_of_range"
+        }
+    ]
+}

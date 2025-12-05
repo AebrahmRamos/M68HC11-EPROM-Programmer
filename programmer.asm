@@ -17,9 +17,9 @@ STACK   EQU     $00FF       ; Top of Internal RAM
 
 ; programming constants
 MAX_RETRIES EQU 25          ; max number of retries for programming pulse
-VPROG_BIT EQU   %00100000   ; bit 5 for VPP control
-OE_BIT    EQU   %01000000   ; bit 6 for output enable
-CE_BIT    EQU   %00100000   ; bit 5 for chip enable
+VPROG_BIT EQU   %00010000   ; bit 4 for VPP control (PA4)
+CE_BIT    EQU   %00100000   ; bit 5 for chip enable (PA5)
+OE_BIT    EQU   %01000000   ; bit 6 for output enable (PA6)
 
 ; variable storage in RAM
 PULSE_COUNT EQU $0100       ; counter for programming pulses
@@ -154,16 +154,27 @@ PULSE_LOOP:
         ; step 2: apply a 1ms programming pulse
         ; turn on VPP, keep OE high, pull CE low
         LDAA    PORTA,X
-        ORAA    #VPROG_BIT      ; turn on VPP
+        ORAA    #VPROG_BIT      ; turn on VPP (12.5V)
         ORAA    #OE_BIT         ; keep OE high (disable output)
+        STAA    PORTA,X
+        
+        ; wait for VPP to stabilize (datasheet requires 2µs to 1ms setup time)
+        NOP
+        NOP
+        NOP
+        NOP
+        
+        ; now pull CE low to start the pulse
+        LDAA    PORTA,X
         ANDA    #%11011111      ; pull CE low (enable chip)
         STAA    PORTA,X
         
         JSR     DELAY_1MS       ; wait for 1ms
 
-        ; end the pulse by pulling CE high
+        ; end the pulse by pulling CE high and turning off VPP
         LDAA    PORTA,X
         ORAA    #CE_BIT         ; pull CE high (disable chip)
+        ANDA    #%11101111      ; turn off VPP (back to 5V)
         STAA    PORTA,X
 
         ; step 3: verify the byte by reading it back
@@ -173,7 +184,7 @@ PULSE_LOOP:
         STAA    DDRC,X
         PULA
 
-        ; turn on read mode (CE low, OE low)
+        ; turn on read mode (CE low, OE low) now that VPP is off
         LDAA    PORTA,X
         ANDA    #%10011111      ; pull CE and OE low for reading
         STAA    PORTA,X
@@ -198,27 +209,42 @@ PULSE_LOOP:
         BRA     PULSE_LOOP      ; go back and try another 1ms pulse
 
 VERIFY_PASS:
-        ; step 5: over-program with a 3ms pulse to ensure proper programming
+        ; step 5: over-program with pulses equal to 3x total previous attempts
         ; set Port C back to output and restore the data
         LDAA    #$FF
         STAA    DDRC,X
         LDAA    0,Y
         STAA    PORTC,X
 
-        ; apply the over-program pulse (VPP on, CE low, OE high)
+        ; calculate over-program duration: PULSE_COUNT * 3ms
+        LDAB    PULSE_COUNT     ; get the number of pulses it took
+        LDAA    #3              ; multiply by 3
+        MUL                     ; result in D (A:B)
+        PSHB                    ; save loop count
+        
+OVER_PROG_LOOP:
+        ; turn on VPP and apply CE low for 1ms
         LDAA    PORTA,X
-        ORAA    #VPROG_BIT
-        ORAA    #OE_BIT
+        ORAA    #VPROG_BIT      ; turn on VPP
+        ORAA    #OE_BIT         ; keep OE high
         ANDA    #%11011111      ; CE low
         STAA    PORTA,X
-
-        JSR     DELAY_1MS       ; pulse for 3ms total
-        JSR     DELAY_1MS
-        JSR     DELAY_1MS
-
-        ; end the over-program pulse
+        
+        JSR     DELAY_1MS       ; 1ms pulse
+        
+        ; end pulse (CE high, but keep VPP on for now)
         LDAA    PORTA,X
-        ORAA    #CE_BIT         ; pull CE high
+        ORAA    #CE_BIT         ; CE high
+        STAA    PORTA,X
+        
+        DECB                    ; one less millisecond to go
+        BNE     OVER_PROG_LOOP  ; repeat for total duration
+        
+        PULB                    ; clean up stack
+        
+        ; end over-program: turn off VPP
+        LDAA    PORTA,X
+        ANDA    #%11101111      ; VPP low
         STAA    PORTA,X
         
         RTS                     ; done! return to caller

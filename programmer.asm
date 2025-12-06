@@ -17,14 +17,16 @@ STACK   EQU     $00FF       ; Top of Internal RAM
 
 ; programming constants
 MAX_RETRIES EQU 25          ; max number of retries for programming pulse
+PGM_BIT   EQU   %00001000   ; bit 3 for program control (PA3)
 VPROG_BIT EQU   %00010000   ; bit 4 for VPP control (PA4)
 CE_BIT    EQU   %00100000   ; bit 5 for chip enable (PA5)
 OE_BIT    EQU   %01000000   ; bit 6 for output enable (PA6)
+DATA_BYTE EQU   $AA         ; test pattern to write (10101010)
 
-; variable storage in RAM
-PULSE_COUNT EQU $0100       ; counter for programming pulses
+; variable storage in RAM (page 0)
+PULSE_COUNT EQU $0000       ; counter for programming pulses
 
-        ORG     $0000       ; start of program in RAM
+        ORG     $0100       ; start of program in RAM (after page 0)
 
 START:
         LDS     #STACK
@@ -40,9 +42,11 @@ START:
         STAA    DDRC,X      ; write to $1007
 
         ; set up the control pins for the EPROM
-        ; start with CE (bit 5) and OE (bit 6) set HIGH so they're inactive
+        ; start with all control pins HIGH (inactive) except VPP which is LOW (5V)
+        ; default state: VPP=0 (5V), PGM=1, CE=1, OE=1 (read mode)
         LDAA    PORTA,X     
-        ORAA    #%01100000  
+        ORAA    #%01101000  ; set OE, CE, PGM high
+        ANDA    #%11101111  ; set VPP low
         STAA    PORTA,X     
 
         ; set up serial communication (SCI)
@@ -60,51 +64,131 @@ START:
         JSR     LONG_DELAY
         ; ==================================================
 
-        ; set up our counters before we start reading
-        CLRA                ; A will track which address we're reading (starts at 0)
-        LDAB    #25         ; B counts how many bytes left to read (25 total)
+        ; set up our counters before we start programming
+        CLRA                ; A will track which address we're programming (starts at 0)
 
-READ_LOOP:
-        ; step 1: tell the EPROM which address we want to read from
-        STAA    PORTB,X     
+MAIN_PROG_LOOP:
+        ; save address in B for safety
+        TAB                 ; store address in B
 
-        NOP                 ; wait a moment for things to stabilize
+        ; reset pulse counter for this byte
+        PSHA
+        LDAA    #0
+        STAA    PULSE_COUNT
+        PULA
 
-        ; step 2: turn on the EPROM by pulling CE and OE low
-        PSHA                ; save our address for later
-        LDAA    PORTA,X     
-        ANDA    #%10011111  ; clear bits 5 and 6 to pull them low
-        STAA    PORTA,X     
-        PULA                ; get our address back
+        ; step 1: set address on Port B
+        STAA    PORTB,X
 
-        NOP                 ; give the EPROM time to put the data on the bus
-        NOP
+        ; step 2: setup data on Port C (output mode)
+        PSHA
+        LDAA    #$FF        ; configure all bits as output
+        STAA    DDRC,X
+        LDAA    #DATA_BYTE  ; load test pattern ($AA)
+        STAA    PORTC,X     ; drive data bus
+        PULA
 
-        ; step 3: read the byte from the EPROM
-        PSHA                ; save our address first (we need A for the data)
-        LDAA    PORTC,X     ; read the data byte from Port C into A
-        
-        ; ==============================================
-        ; step 4: send what we just read to the computer
-        ; ==============================================
-        JSR     SEND_SERIAL ; call subroutine to transmit the byte
-        ; ==============================================
-
-        PULA                ; bring back our address counter
-
-        ; step 5: turn off the EPROM by setting CE and OE back to high
+        ; step 3: enable high voltage (VPP=12.5V, VCC=6V)
         PSHA
         LDAA    PORTA,X
-        ORAA    #%01100000  
+        ORAA    #VPROG_BIT  ; turn on VPP (PA4 high)
+        STAA    PORTA,X
+        PULA
+        
+        ; wait for VPP to rise (at least 2µs)
+        NOP
+        NOP
+
+PULSE_RETRY_LOOP:
+        ; step 4: programming pulse sequence
+        ; PGM low -> CE low (pulse starts) -> CE high (pulse ends) -> PGM high
+        
+        PSHA
+        LDAA    PORTA,X
+        ANDA    #%11110111  ; pull PGM low (bit 3)
+        STAA    PORTA,X
+        
+        ANDA    #%11011111  ; pull CE low (bit 5) - START PULSE
+        STAA    PORTA,X
+        
+        JSR     DELAY_1MS   ; wait for 1ms
+        
+        ORAA    #CE_BIT     ; pull CE high (bit 5) - END PULSE
+        STAA    PORTA,X
+        
+        ORAA    #PGM_BIT    ; pull PGM high (bit 3)
         STAA    PORTA,X
         PULA
 
-        ; step 6: move to the next byte
-        INCA                ; go to next address
-        DECB                ; one less byte to read
-        BNE     READ_LOOP   ; keep going if we're not done yet
+        ; step 5: verify (read byte back)
+        ; switch Port C to input mode
+        PSHA
+        LDAA    #$00
+        STAA    DDRC,X
+        PULA
 
-        SWI                 ; all done! stop heredone! stop here
+        ; enable read mode (CE low, OE low)
+        PSHA
+        LDAA    PORTA,X
+        ANDA    #%10011111  ; clear bits 5 and 6
+        STAA    PORTA,X
+        NOP                 ; wait for data to appear
+        NOP
+        
+        LDAA    PORTC,X     ; read data from EPROM
+        CMPA    #DATA_BYTE  ; compare with expected value
+        BEQ     BYTE_VERIFIED
+        
+        ; step 6: verify failed - setup for retry
+        ; disable read (CE/OE high)
+        LDAA    PORTA,X
+        ORAA    #%01100000
+        STAA    PORTA,X
+        PULA                ; restore address A
+        
+        ; reset Port C to output for next retry
+        PSHA
+        LDAA    #$FF
+        STAA    DDRC,X
+        LDAA    #DATA_BYTE
+        STAA    PORTC,X
+        PULA
+
+        INC     PULSE_COUNT ; increment retry counter
+        LDAA    PULSE_COUNT
+        CMPA    #MAX_RETRIES
+        BNE     PULSE_RETRY_LOOP ; retry if under limit
+        
+        SWI                 ; fatal error - defective chip
+
+BYTE_VERIFIED:
+        ; disable read (CE/OE high)
+        LDAA    PORTA,X
+        ORAA    #%01100000
+        STAA    PORTA,X
+        PULA                ; restore address A
+
+        ; step 7: over-program pulse (3ms) for data retention
+        JSR     OVER_PROGRAM
+        
+        ; step 8: disable high voltage (back to 5V)
+        PSHA
+        LDAA    PORTA,X
+        ANDA    #%11101111  ; turn off VPP (PA4 low)
+        STAA    PORTA,X
+        PULA
+        
+        ; send feedback to PC
+        PSHA
+        LDAA    #DATA_BYTE
+        JSR     SEND_SERIAL
+        PULA
+
+        INCA                ; move to next address
+        CMPA    #25         ; have we programmed all 25 bytes?
+        BNE     MAIN_PROG_LOOP
+
+        SWI                 ; all done!
 
 ; subroutine to send whatever's in A out the serial port
 SEND_SERIAL:
@@ -130,143 +214,49 @@ DELAY_INNER:
         PULY                ; restore Y
         RTS
 
-; subroutine to program a single byte to the EPROM
-; assumes: data to program is in stack at 0,Y
-; assumes: address to program is in stack at 1,Y
-PROGRAM_BYTE:
-        LDAA    #1              ; start with pulse count = 1
-        STAA    PULSE_COUNT     ; store it
-
-PULSE_LOOP:
-        ; step 1: set data and address on the EPROM pins
-        LDAA    1,Y             ; load address from stack
-        STAA    PORTB,X         ; put it on the address lines
-        
-        ; set Port C to output mode
+; subroutine for over-programming (3ms pulse for data retention)
+OVER_PROGRAM:
+        ; re-drive data on Port C (output mode)
         PSHA
-        LDAA    #$FF            ; configure all bits as output
+        LDAA    #$FF
         STAA    DDRC,X
-        PULA
+        LDAA    #DATA_BYTE
+        STAA    PORTC,X
         
-        LDAA    0,Y             ; load data from stack
-        STAA    PORTC,X         ; put it on the data lines
-
-        ; step 2: apply a 1ms programming pulse
-        ; turn on VPP, keep OE high, pull CE low
+        ; ensure VPP is still high
         LDAA    PORTA,X
-        ORAA    #VPROG_BIT      ; turn on VPP (12.5V)
-        ORAA    #OE_BIT         ; keep OE high (disable output)
+        ORAA    #VPROG_BIT
         STAA    PORTA,X
         
-        ; wait for VPP to stabilize (datasheet requires 2µs to 1ms setup time)
-        NOP
-        NOP
-        NOP
-        NOP
-        
-        ; now pull CE low to start the pulse
-        LDAA    PORTA,X
-        ANDA    #%11011111      ; pull CE low (enable chip)
+        ; assert PGM low
+        ANDA    #%11110111
         STAA    PORTA,X
         
-        JSR     DELAY_1MS       ; wait for 1ms
-
-        ; end the pulse by pulling CE high and turning off VPP
-        LDAA    PORTA,X
-        ORAA    #CE_BIT         ; pull CE high (disable chip)
-        ANDA    #%11101111      ; turn off VPP (back to 5V)
+        ; pulse CE low
+        ANDA    #%11011111
         STAA    PORTA,X
-
-        ; step 3: verify the byte by reading it back
-        ; set Port C to input mode so we can read
-        PSHA
+        
+        ; wait for 3ms (three 1ms delays)
+        JSR     DELAY_1MS
+        JSR     DELAY_1MS
+        JSR     DELAY_1MS
+        
+        ; end pulse (CE high, PGM high)
+        ORAA    #CE_BIT
+        ORAA    #PGM_BIT
+        STAA    PORTA,X
+        
+        ; set Port C back to input
         LDAA    #$00
         STAA    DDRC,X
         PULA
-
-        ; turn on read mode (CE low, OE low) now that VPP is off
-        LDAA    PORTA,X
-        ANDA    #%10011111      ; pull CE and OE low for reading
-        STAA    PORTA,X
-        
-        NOP                     ; wait for data to appear
-        
-        LDAA    PORTC,X         ; read the data we just programmed
-        CMPA    0,Y             ; compare it with what we wanted
-        BEQ     VERIFY_PASS     ; if they match, we're done with this byte!
-
-        ; step 4: verify failed - we need to retry
-        ; reset the control pins to inactive
-        LDAA    PORTA,X
-        ORAA    #%01100000      ; pull CE and OE back high
-        STAA    PORTA,X
-
-        INC     PULSE_COUNT     ; try again (increment pulse count)
-        LDAA    PULSE_COUNT
-        CMPA    #MAX_RETRIES    ; have we tried too many times?
-        BGT     PROG_FAIL       ; if yes, the EPROM might be defective
-        
-        BRA     PULSE_LOOP      ; go back and try another 1ms pulse
-
-VERIFY_PASS:
-        ; step 5: over-program with pulses equal to 3x total previous attempts
-        ; set Port C back to output and restore the data
-        LDAA    #$FF
-        STAA    DDRC,X
-        LDAA    0,Y
-        STAA    PORTC,X
-
-        ; calculate over-program duration: PULSE_COUNT * 3ms
-        LDAB    PULSE_COUNT     ; get the number of pulses it took
-        LDAA    #3              ; multiply by 3
-        MUL                     ; result in D (A:B)
-        PSHB                    ; save loop count
-        
-OVER_PROG_LOOP:
-        ; turn on VPP and apply CE low for 1ms
-        LDAA    PORTA,X
-        ORAA    #VPROG_BIT      ; turn on VPP
-        ORAA    #OE_BIT         ; keep OE high
-        ANDA    #%11011111      ; CE low
-        STAA    PORTA,X
-        
-        JSR     DELAY_1MS       ; 1ms pulse
-        
-        ; end pulse (CE high, but keep VPP on for now)
-        LDAA    PORTA,X
-        ORAA    #CE_BIT         ; CE high
-        STAA    PORTA,X
-        
-        DECB                    ; one less millisecond to go
-        BNE     OVER_PROG_LOOP  ; repeat for total duration
-        
-        PULB                    ; clean up stack
-        
-        ; end over-program: turn off VPP
-        LDAA    PORTA,X
-        ANDA    #%11101111      ; VPP low
-        STAA    PORTA,X
-        
-        RTS                     ; done! return to caller
-
-PROG_FAIL:
-        ; byte could not be programmed after 25 retries
-        SWI                     ; stop and signal error
+        RTS
 
 ; subroutine for 1 millisecond delay
 DELAY_1MS:
         PSHY
-        PSHX
-        
-        LDY     #$0004          ; approx. 1ms at 2MHz E-clock
-DELAY_1MS_OUTER:
-        LDX     #$FFFF
-DELAY_1MS_INNER:
-        DEX
-        BNE     DELAY_1MS_INNER
-        DEY
-        BNE     DELAY_1MS_OUTER
-        
-        PULX
+        LDY     #500            ; 500 loops * ~4 cycles = 2000 cycles at 2MHz = 1ms
+D1:     DEY
+        BNE     D1
         PULY
         RTS
